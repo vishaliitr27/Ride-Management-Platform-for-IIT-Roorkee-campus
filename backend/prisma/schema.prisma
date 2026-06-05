@@ -1,0 +1,122 @@
+// Prisma schema for the campus ride platform.
+// Using SQLite so the project runs without any external database setup.
+// SQLite has no native enums, so status-style fields are stored as strings
+// and validated in the application layer (see src/lib/validation.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String // PASSENGER | DRIVER
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  driverProfile    DriverProfile?
+  ridesAsPassenger Ride[]         @relation("PassengerRides")
+  ridesAsDriver    Ride[]         @relation("DriverRides")
+  ratingsGiven     Rating[]       @relation("PassengerRatings")
+  ratingsReceived  Rating[]       @relation("DriverRatings")
+}
+
+model DriverProfile {
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleType        String // E_RICKSHAW | CAR | BIKE
+  vehicleNumber      String
+  vehicleModel       String?
+  licenseNumber      String
+  upiId              String? // UPI VPA used to collect ride payments
+  verificationStatus String    @default("PENDING") // PENDING | VERIFIED | REJECTED
+  isOnline           Boolean   @default(false)
+  currentLat         Float?
+  currentLng         Float?
+  lastLocationAt     DateTime?
+  ratingAvg          Float     @default(0)
+  ratingCount        Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model Ride {
+  id            String    @id @default(uuid())
+  passengerId   String
+  passenger     User      @relation("PassengerRides", fields: [passengerId], references: [id])
+  driverId      String?
+  driver        User?     @relation("DriverRides", fields: [driverId], references: [id])
+  status        String    @default("REQUESTED") // REQUESTED | ACCEPTED | IN_PROGRESS | COMPLETED | CANCELLED
+  pickupLat     Float
+  pickupLng     Float
+  pickupAddress String
+  destLat       Float
+  destLng       Float
+  destAddress   String
+  distanceKm    Float?
+  fareEstimate  Float?
+  scheduledFor  DateTime?
+  dispatchedAt  DateTime? // when the request was offered to drivers (null = scheduled, waiting)
+  requestedAt   DateTime  @default(now())
+  acceptedAt    DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  cancelledBy   String? // PASSENGER | DRIVER | SYSTEM
+
+  statusEvents RideStatusEvent[]
+  rating       Rating?
+  payments     Payment[]
+
+  @@index([status])
+  @@index([driverId, status])
+  @@index([passengerId, status])
+}
+
+// Audit trail of every state change. Doubles as the source for demand analytics.
+model RideStatusEvent {
+  id        String   @id @default(uuid())
+  rideId    String
+  ride      Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  status    String
+  changedBy String?
+  createdAt DateTime @default(now())
+
+  @@index([rideId])
+}
+
+model Rating {
+  id          String   @id @default(uuid())
+  rideId      String   @unique
+  ride        Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  passengerId String
+  passenger   User     @relation("PassengerRatings", fields: [passengerId], references: [id])
+  driverId    String
+  driver      User     @relation("DriverRatings", fields: [driverId], references: [id])
+  score       Int
+  feedback    String?
+  createdAt   DateTime @default(now())
+
+  @@index([driverId])
+}
+
+model Payment {
+  id        String   @id @default(uuid())
+  rideId    String
+  ride      Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  amount    Float
+  method    String // CASH | UPI | QR
+  status    String   @default("PENDING") // PENDING | SUCCESS | FAILED
+  createdAt DateTime @default(now())
+
+  @@index([rideId])
+}
